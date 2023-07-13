@@ -1,0 +1,66 @@
+su -s /bin/bash
+
+cryptsetup open /dev/nvme0n1p3 root
+cryptsetup open /dev/sda1 home
+
+mkfs.vfat /dev/nvme0n1p1
+mkfs.ext4 -O "^has_journal" /dev/nvme0n1p2
+mkfs.ext4 /dev/mapper/root
+
+mount /dev/mapper/root /mnt
+mount --mkdir /dev/nvme0n1p2 /mnt/boot
+mount --mkdir /dev/nvme0n1p1 /mnt/boot/efi
+mount --mkdir /dev/mapper/home /mnt/home
+
+mkdir -p /mnt/var/db/xbps/keys
+cp /var/db/xbps/keys/* /mnt/var/db/xbps/keys/
+
+xbps-install -Sy -R https://repo-default.voidlinux.org/current/musl -r /mnt base-system cryptsetup grub-x86_64-efi linux linux-firmware vim
+
+xchroot /mnt
+chown root:root /
+chmod 755 /
+passwd root
+echo "void" > /etc/hostname
+
+blkid >> /tmp/1
+
+vim /etc/fstab
+# <file system> <dir> <type> <options> <dump> <pass>
+tmpfs      /tmp       tmpfs  defaults,nosuid,nodev  0  0
+
+# /dev/mapper/root
+UUID=xxxx  /          ext4   rw,relatime  0  1
+
+# /dev/nvme0n1p2
+UUID=xxxx  /boot      ext4  rw,relatime  0  2
+
+# /dev/nvme0n1p1
+UUID=xxxx  /boot/efi  vfat  rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro	0 2
+
+# /dev/mapper/home
+UUID=xxxx  /home      ext4  rw,relatime	0 2
+
+
+chmod -R g-rwx,o-rwx /boot
+
+cp /home/crypthome.key /etc/home.key
+chown root:root /etc/home.key
+chmod 000 /etc/home.key
+
+vim /etc/crypttab
+home	UUID=xxxx	/etc/home.key	luks
+
+vim /etc/dracut.conf.d/10-crypt.conf
+install_items+=" /etc/crypttab "
+
+vim  /etc/dracut.conf.d/override.conf
+hostonly=yes
+
+vim /etc/default/grub
+GRUB_CMDLINE_LINUX_DEFAULT="loglevel=4 rd.luks.allow-discards=xxxx rd.luks.name=xxxx=root root=/dev/mapper/root"
+
+grub-install
+grub-mkconfig -o /boot/grub/grub.cfg
+
+xbps-reconfigure -fa
